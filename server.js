@@ -381,6 +381,90 @@ app.get('/api/stats/player/:id/net-curve', authRequired, async (req,res)=>{
   res.json(curve);
 });
 
+// --- Course stats ---
+app.get('/api/stats/course/:id', authRequired, async (req, res) => {
+  const courseId = req.params.id;
+
+  // 1) Course info
+  const { rows: crows } = await q(
+    'SELECT id, name, location, hole_pars AS "holePars", rating, slope FROM courses WHERE id=$1',
+    [courseId]
+  );
+  if (crows.length === 0) return res.status(404).json({ error: 'course not found' });
+  const course = crows[0];
+
+  // 2) All rounds at this course
+  const { rows: rrows } = await q(
+    `SELECT r.id, r.player_id AS "playerId", r.total, r.holes, r.date,
+            p.name AS "playerName"
+       FROM rounds r
+       JOIN players p ON p.id = r.player_id
+      WHERE r.course_id = $1
+      ORDER BY r.date DESC`,
+    [courseId]
+  );
+
+  if (rrows.length === 0) {
+    return res.json({
+      course,
+      averageAtCourse: null,
+      bestAtCourse: null,
+      easiest: null,
+      hardest: null,
+      bestPlayer: null
+    });
+  }
+
+  // 3) Average & best at course
+  const totals = rrows.map(r => Number(r.total));
+  const averageAtCourse = totals.reduce((a,b) => a+b, 0) / totals.length;
+  const bestRound = rrows.reduce((m, r) => (r.total < m.total ? r : m), rrows[0]);
+  const bestAtCourse = {
+    score: Number(bestRound.total),
+    by: bestRound.playerName,
+    playerId: bestRound.playerId,
+    date: bestRound.date
+  };
+
+  // 4) Easiest/Hardest hole:
+  // For each hole i: over = (avg score on hole i) - par[i]
+  const n = rrows.length;
+  const sumsPerHole = Array.from({length: 18}, () => 0);
+  rrows.forEach(r => r.holes.forEach((s, i) => { sumsPerHole[i] += Number(s) || 0; }));
+  const overPerHole = sumsPerHole.map((sum, i) => (sum / n) - Number(course.holePars[i]));
+
+  let easiestIdx = 0, hardestIdx = 0;
+  overPerHole.forEach((ov, i) => {
+    if (ov < overPerHole[easiestIdx]) easiestIdx = i;
+    if (ov > overPerHole[hardestIdx]) hardestIdx = i;
+  });
+  const easiest = { hole: easiestIdx + 1, over: overPerHole[easiestIdx] };
+  const hardest = { hole: hardestIdx + 1, over: overPerHole[hardestIdx] };
+
+  // 5) Best player at course (lowest average total)
+  const byPlayer = new Map();
+  rrows.forEach(r => {
+    if (!byPlayer.has(r.playerId)) byPlayer.set(r.playerId, { name: r.playerName, totals: [] });
+    byPlayer.get(r.playerId).totals.push(Number(r.total));
+  });
+  let bestPlayer = null;
+  for (const [playerId, v] of byPlayer.entries()) {
+    const avg = v.totals.reduce((a,b)=>a+b,0) / v.totals.length;
+    if (!bestPlayer || avg < bestPlayer.avg) {
+      bestPlayer = { playerId, name: v.name, avg, n: v.totals.length };
+    }
+  }
+
+  res.json({
+    course,
+    averageAtCourse,
+    bestAtCourse,
+    easiest,
+    hardest,
+    bestPlayer
+  });
+});
+
 // Milestones feed
 app.get('/api/milestones', authRequired, async (req,res)=>{
   const { rows: rounds } = await q(`SELECT r.*, p.name AS player_name, c.name AS course_name, c.hole_pars AS "holePars"
