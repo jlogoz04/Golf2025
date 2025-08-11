@@ -133,7 +133,7 @@ async function renderPersonStats(playerId){
     $('#person-rounds').innerHTML = '<div class="hint">No rounds yet for this player.</div>';
     if(psChart){ psChart.destroy(); psChart=null; }
     const ctx = $('#ps-chart').getContext('2d');
-    psChart = new Chart(ctx,{ type:'line', data:{labels:[], datasets:[{label:'Net', data:[]}]}, options:{responsive:true}});
+    psChart = new Chart(ctx,{ type:'line', data:{labels:[], datasets:[{label:'Gross score', data:[]}]}, options:{responsive:true}});
     return;
   }
   $('#ps-avg').textContent = s.average.toFixed(1);
@@ -149,7 +149,7 @@ async function renderPersonStats(playerId){
   const ctx = $('#ps-chart').getContext('2d');
   psChart = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [ { label: 'Net score', data: netData }, { label: 'Gross score', data: grossData } ] },
+    data: { labels, datasets: [ { label: 'Gross score', data: grossData } ] },
     options: { responsive: true, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { display: true } }, scales: { y: { title: { display: true, text: 'Strokes' } }, x: { title: { display: true, text: 'Date' } } } }
   });
 
