@@ -81,6 +81,97 @@ async function ensureAuth(){
   }
 }
 
+// ===== 18Birdies OCR upload (client-side via Tesseract.js) =====
+function textToCandidates(txt){
+  // Normalize and collect digits
+  const t = txt.replace(/[|,]/g,' ').replace(/\s+/g,' ').trim();
+  const nums = t.match(/\d+/g) || [];
+
+  // Sliding windows of 18 numbers, each 1..15 → likely a score row
+  const scores = [];
+  for(let i=0;i<=nums.length-18;i++){
+    const slice = nums.slice(i, i+18).map(n=>Number(n));
+    if(slice.every(n=> n>=1 && n<=15)){
+      const total = slice.reduce((a,b)=>a+b,0);
+      scores.push({ kind:'scores', values: slice, total });
+    }
+  }
+  // Deduplicate and sort
+  const seen = new Set(); const out = [];
+  for(const c of scores){
+    const k = c.values.join('-');
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(c);
+  }
+  out.sort((a,b)=> a.total - b.total);
+  return out.slice(0, 10);
+}
+
+async function ocrImage(file, onProgress){
+  const dataUrl = await new Promise((resolve,reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=> resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(file);
+  });
+  const { createWorker } = Tesseract;
+  const worker = await createWorker('eng', 1, { logger: m => onProgress?.(m) });
+  const ret = await worker.recognize(dataUrl);
+  await worker.terminate();
+  return ret.data.text || '';
+}
+
+function setupScorecardUploader(){
+  const fileIn = document.getElementById('scorecard-file');
+  const btn = document.getElementById('scorecard-ocr-btn');
+  const res = document.getElementById('scorecard-results');
+  if(!fileIn || !btn || !res) return;
+
+  btn.onclick = async ()=>{
+    if(!fileIn.files || !fileIn.files[0]){
+      res.innerHTML = '<div class="hint">Choose an image first.</div>'; return;
+    }
+    res.innerHTML = '<div class="hint">Running OCR… this can take ~10–20 seconds depending on your device.</div>';
+
+    try{
+      const txt = await ocrImage(fileIn.files[0], (m)=>{
+        if(m.status){
+          res.innerHTML = `<div class="hint">${m.status}${m.progress? ' — '+Math.round(m.progress*100)+'%':''}</div>`;
+        }
+      });
+      const candidates = textToCandidates(txt);
+      if(candidates.length===0){
+        res.innerHTML = '<div class="hint">No 18-number rows (1–15) detected. You can still fill scores manually.</div>';
+        return;
+      }
+      const ul = document.createElement('div');
+      candidates.forEach((c,idx)=>{
+        const row = document.createElement('div'); row.className='card'; row.style.padding='10px 12px';
+        row.innerHTML = `<div class="row" style="justify-content:space-between">
+          <div class="hint">Candidate ${idx+1} — total ${c.total}</div>
+          <button class="btn secondary">Use this</button>
+        </div>
+        <div style="margin-top:8px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace">${c.values.join(' · ')}</div>`;
+        row.querySelector('button').onclick = ()=>{
+          const wrap = document.getElementById('log-table-wrap');
+          const selects = Array.from(wrap.querySelectorAll('.score-in'));
+          if(selects.length !== 18){
+            alert('Please ensure the course is selected and the score table is visible.');
+            return;
+          }
+          selects.forEach((sel,i)=> sel.value = String(c.values[i]));
+          updateLogTotals();
+          res.innerHTML = '<div class="hint">Scores applied — review and Save round.</div>';
+        };
+        ul.appendChild(row);
+      });
+      res.innerHTML = ''; res.appendChild(ul);
+    }catch(e){
+      res.innerHTML = `<div class="hint">OCR failed: ${e.message || e}</div>`;
+    }
+  };
+}
+
 // ===== Pages =====
 
 // Home
@@ -302,9 +393,11 @@ async function renderLogPage(){
 
   cSel.innerHTML = courses.map(c=>`<option value="${c.id}">${c.name} — ${c.location||''}</option>`).join('');
   cSel.onchange = buildLogTable; buildLogTable();
-  initDateSelectors();
-  $('#log-save').onclick = saveLoggedRound;
+initDateSelectors();
+setupScorecardUploader();
+$('#log-save').onclick = saveLoggedRound;
 }
+
 function initDateSelectors(){
   const day = $('#log-day'), mon = $('#log-month'), yr = $('#log-year');
   day.innerHTML = Array.from({length:31}, (_,i)=>`<option value="${i+1}">${i+1}</option>`).join('');
