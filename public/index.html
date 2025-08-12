@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4.1.1/dist/tesseract.min.js"></script>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -187,6 +188,25 @@
           </div>
           <div style="height:12px"></div>
           <div id="log-table-wrap"></div>
+
+<div style="height:16px"></div>
+<details class="round"><summary>Upload 18Birdies scorecard (image)</summary>
+  <div class="bd">
+    <div class="row">
+      <div class="field" style="flex:2">
+        <label>Image file (PNG/JPG)</label>
+        <input id="scorecard-file" type="file" accept="image/*">
+      </div>
+      <div style="align-self:flex-end">
+        <button class="btn secondary" id="scorecard-ocr-btn">OCR &amp; parse</button>
+      </div>
+    </div>
+    <div class="hint">OCR runs in your browser. We’ll suggest candidate 18-hole rows; pick one to prefill the table. You can still edit before saving.</div>
+    <div style="height:10px"></div>
+    <div id="scorecard-results" class="list"></div>
+  </div>
+</details>
+
           <div style="height:12px"></div>
           <div class="grid">
             <div class="col-4"><div class="field"><label>Computed total</label><input id="log-total" type="number" readonly></div></div>
