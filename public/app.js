@@ -121,7 +121,7 @@ async function renderPersonStats(playerId){
     $('#person-rounds').innerHTML = '<div class="hint">No rounds yet for this player.</div>';
     if(psChart){ psChart.destroy(); psChart=null; }
     const ctx = $('#ps-chart').getContext('2d');
-    psChart = new Chart(ctx,{ type:'line', data:{labels:[], datasets:[{label:'Gross score', data:[]}]}, options:{responsive:true}});
+    psChart = new Chart(ctx,{ type:'line', data:{labels:[], datasets:[{label:'Over/under Par', data:[]}]}, options:{responsive:true}});
     return;
   }
   $('#ps-avg').textContent = s.average.toFixed(1);
@@ -130,15 +130,28 @@ async function renderPersonStats(playerId){
   $('#ps-hcp').textContent = s.handicap.value!=null ? s.handicap.value.toFixed(1) : '—';
   $('#ps-hcp-hint').textContent = s.handicap.value!=null ? `(based on ${s.handicap.used} of ${s.handicap.total} rounds)` : '';
 
-  const labels = curve.map(d=> formatDateAU(d.date));
-  const grossData = curve.map(d=> d.gross);
-  if(psChart){ psChart.destroy(); }
-  const ctx = $('#ps-chart').getContext('2d');
-  psChart = new Chart(ctx, {
-    type: 'line',
-    data: { labels, datasets: [ { label: 'Gross score', data: grossData } ] },
-    options: { responsive: true, interaction: { mode: 'nearest', intersect: false }, plugins: { legend: { display: true } }, scales: { y: { title: { display: true, text: 'Strokes' } }, x: { title: { display: true, text: 'Date' } } } }
-  });
+  const sorted = rounds.slice().sort((a,b)=> new Date(a.date) - new Date(b.date));
+const labels = sorted.map(r=> formatDateAU(r.date));
+const overData = sorted.map(r=>{
+  const crs = courses.find(c=> c.id===r.courseId);
+  const parTotal = (crs?.holePars||[]).reduce((a,b)=>a+Number(b),0);
+  return Number(r.total) - Number(parTotal||0); // over/under par
+});
+if(psChart){ psChart.destroy(); }
+const ctx = $('#ps-chart').getContext('2d');
+psChart = new Chart(ctx, {
+  type: 'line',
+  data: { labels, datasets: [ { label: 'Over/under par', data: overData } ] },
+  options: {
+    responsive: true,
+    interaction: { mode: 'nearest', intersect: false },
+    plugins: { legend: { display: true } },
+    scales: {
+      y: { title: { display: true, text: 'Strokes vs par' }, suggestedMin: -10, suggestedMax: 20 },
+      x: { title: { display: true, text: 'Date' } }
+    }
+  }
+});
 
   const list = $('#person-rounds'); list.innerHTML='';
   rounds.forEach(r=>{
