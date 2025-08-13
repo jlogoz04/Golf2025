@@ -129,47 +129,180 @@ function setupScorecardUploader(){
 
   btn.onclick = async ()=>{
     if(!fileIn.files || !fileIn.files[0]){
-      res.innerHTML = '<div class="hint">Choose an image first.</div>'; return;
+      res.innerHTML = '<div class="hint">Choose an image first.</div>'; 
+      return;
     }
-    res.innerHTML = '<div class="hint">Running OCR… this can take ~10–20 seconds depending on your device.</div>';
-
     try{
-      const txt = await ocrImage(fileIn.files[0], (m)=>{
-        if(m.status){
-          res.innerHTML = `<div class="hint">${m.status}${m.progress? ' — '+Math.round(m.progress*100)+'%':''}</div>`;
+      res.innerHTML = '<div class="hint">Running OCR…</div>';
+
+      // Uses the helpers from Step 3 (parse18BirdiesAndApply)
+      const out = await parse18BirdiesAndApply(
+        fileIn.files[0], 
+        { onStatus: s => res.innerHTML = `<div class="hint">${s}</div>` }
+      );
+
+      // Show what we detected
+      const msgs = [];
+      if(out.courseText) msgs.push(`Course detected: <strong>${out.courseText}</strong>`);
+      if(out.day && out.month && out.year) msgs.push(
+        `Date detected: <strong>${String(out.day).padStart(2,'0')}/${String(out.month).padStart(2,'0')}/${out.year}</strong>`
+      );
+      if(out.scores18) msgs.push(`Scores detected: <code>${out.scores18.join(', ')}</code>`);
+      res.innerHTML = `<div class="hint">${msgs.length? msgs.join('<br>') : 'Parsed, but could not detect the fields.'}</div>`;
+
+      // Apply course (fuzzy match)
+      if(out.pickedCourseId){
+        const sel = document.getElementById('log-course');
+        if(sel){
+          sel.value = out.pickedCourseId;
+          buildLogTable(); // rebuild score table for that course
         }
-      });
-      const candidates = textToCandidates(txt);
-      if(candidates.length===0){
-        res.innerHTML = '<div class="hint">No 18-number rows (1–15) detected. You can still fill scores manually.</div>';
-        return;
       }
-      const ul = document.createElement('div');
-      candidates.forEach((c,idx)=>{
-        const row = document.createElement('div'); row.className='card'; row.style.padding='10px 12px';
-        row.innerHTML = `<div class="row" style="justify-content:space-between">
-          <div class="hint">Candidate ${idx+1} — total ${c.total}</div>
-          <button class="btn secondary">Use this</button>
-        </div>
-        <div style="margin-top:8px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace">${c.values.join(' · ')}</div>`;
-        row.querySelector('button').onclick = ()=>{
-          const wrap = document.getElementById('log-table-wrap');
-          const selects = Array.from(wrap.querySelectorAll('.score-in'));
-          if(selects.length !== 18){
-            alert('Please ensure the course is selected and the score table is visible.');
-            return;
-          }
-          selects.forEach((sel,i)=> sel.value = String(c.values[i]));
+
+      // Apply date
+      if(out.day && out.month && out.year){
+        const d = document.getElementById('log-day');
+        const m = document.getElementById('log-month');
+        const y = document.getElementById('log-year');
+        if(d&&m&&y){ d.value = out.day; m.value = out.month; y.value = out.year; }
+      }
+
+      // Apply 18 scores
+      if(out.scores18){
+        const wrap = document.getElementById('log-table-wrap');
+        const selects = Array.from(wrap.querySelectorAll('.score-in'));
+        if(selects.length === 18){
+          selects.forEach((sel,i)=> sel.value = String(out.scores18[i]));
           updateLogTotals();
-          res.innerHTML = '<div class="hint">Scores applied — review and Save round.</div>';
-        };
-        ul.appendChild(row);
-      });
-      res.innerHTML = ''; res.appendChild(ul);
+          res.innerHTML += '<div class="hint" style="margin-top:8px">Applied scores — review and Save round.</div>';
+        }else{
+          res.innerHTML += '<div class="hint" style="margin-top:8px">Could not find the 18 score inputs (is the course selected?).</div>';
+        }
+      }else{
+        res.innerHTML += '<div class="hint" style="margin-top:8px">Couldn’t confidently read the 18 scores. You can still use manual entry.</div>';
+      }
     }catch(e){
       res.innerHTML = `<div class="hint">OCR failed: ${e.message || e}</div>`;
     }
   };
+}
+
+// ===== 18Birdies parser (exact layout) =====
+const norm = s => (s||'').toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim();
+
+// Simple Levenshtein distance for fuzzy course match
+function lev(a,b){
+  a = norm(a); b = norm(b);
+  const m=a.length, n=b.length;
+  if(!m||!n) return Math.max(m,n);
+  const dp = Array.from({length:m+1}, (_,i)=>[i].concat(Array(n).fill(0)));
+  for(let j=1;j<=n;j++) dp[0][j]=j;
+  for(let i=1;i<=m;i++){
+    for(let j=1;j<=n;j++){
+      const cost = a[i-1]===b[j-1]?0:1;
+      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+    }
+  }
+  return dp[m][n];
+}
+
+async function ocrFull(file, onProgress){
+  const dataUrl = await new Promise((resolve,reject)=>{
+    const fr = new FileReader(); fr.onload = ()=>resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(file);
+  });
+  const { createWorker } = Tesseract;
+  const worker = await createWorker('eng', 1, { logger: onProgress? (m)=>onProgress(m) : undefined });
+  const out = await worker.recognize(dataUrl);
+  await worker.terminate();
+  return out; // out.data.text and out.data.words
+}
+
+function extractCourseAndDate(text){
+  // Course name = first non-empty line; date like 25/10/2024 (or 25/10/24)
+  const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const courseLine = lines[0] || '';
+  const m = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  let day=null, month=null, year=null;
+  if(m){
+    day = +m[1]; month = +m[2]; year = +m[3]; if(year<100) year += 2000;
+  }
+  return { courseText: courseLine, day, month, year };
+}
+
+function extractTwoRowsOfNineNumbers(words){
+  // Keep numeric tokens and their midpoints
+  const items = words
+    .filter(w => /^\d+$/.test(w.text))
+    .map(w => ({ n: +w.text, x: (w.bbox.x0 + w.bbox.x1)/2, y: (w.bbox.y0 + w.bbox.y1)/2 }));
+  if(items.length < 18) return null;
+
+  // Cluster by Y to identify text rows
+  items.sort((a,b)=> a.y - b.y);
+  const rows=[]; let cur=[];
+  const rowGap = Math.max(18, (items[items.length-1].y - items[0].y) * 0.03);
+  for(const it of items){
+    if(!cur.length || Math.abs(it.y - cur[cur.length-1].y) < rowGap){ cur.push(it); }
+    else { rows.push(cur); cur=[it]; }
+  }
+  if(cur.length) rows.push(cur);
+
+  // For each row, left→right, keep 1..15, drop the last if there are 10 (9 holes + total)
+  const scoreRows = rows.map(r=>{
+    const nums = r.slice().sort((a,b)=> a.x - b.x).map(z=>z.n);
+    // Keep only valid hole scores
+    const onlyScores = nums.filter(v => v>=1 && v<=15);
+    // If row has 10 numbers, drop the rightmost (9-hole total)
+    if(onlyScores.length >= 10) onlyScores.pop();
+    return onlyScores;
+  }).filter(arr => arr.length >= 9);
+
+  // Pick the two rows with the most valid numbers
+  scoreRows.sort((a,b)=> b.length - a.length);
+  if(scoreRows.length < 2) return null;
+  const first9  = scoreRows[0].slice(0,9);
+  const second9 = scoreRows[1].slice(0,9);
+  if(first9.length!==9 || second9.length!==9) return null;
+  return first9.concat(second9); // 18 scores
+}
+
+async function parse18BirdiesAndApply(file, { onStatus } = {}){
+  onStatus?.('OCR starting…');
+  const result = await ocrFull(file, (m)=> onStatus?.(`${m.status || 'working'} ${m.progress!=null? '— '+Math.round(m.progress*100)+'%':''}`));
+  const text = result.data.text || '';
+  const words = result.data.words || [];
+
+  // 1) course + date
+  const { courseText, day, month, year } = extractCourseAndDate(text);
+
+  // 2) scores
+  const scores18 = extractTwoRowsOfNineNumbers(words);
+
+  // 3) try to pick the course
+  let pickedCourseId = null;
+  try{
+    const courses = await getCourses();
+    if(courses?.length){
+      // Best fuzzy match by Levenshtein distance; also accept substring match as a tie-breaker
+      const target = norm(courseText);
+      // small hand-fix: your Neon has "Antill Park Country Golf Club"
+      const aliases = {
+        'antill park golf club':'antill park country golf club'
+      };
+      const targetAdj = aliases[target] || target;
+
+      let best = null;
+      courses.forEach(c=>{
+        const cand = norm(c.name);
+        const d = Math.min(lev(targetAdj, cand), lev(cand, targetAdj));
+        const bonus = (cand.includes(targetAdj) || targetAdj.includes(cand)) ? 0 : 0.25; // prefer substrings
+        const score = d + bonus;
+        if(!best || score < best.score) best = { id: c.id, score, name: c.name };
+      });
+      pickedCourseId = best?.id || null;
+    }
+  }catch{}
+
+  return { text, words, courseText, day, month, year, scores18, pickedCourseId };
 }
 
 // ===== Pages =====
