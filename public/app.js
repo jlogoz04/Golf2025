@@ -231,17 +231,6 @@ function lev(a,b){
   return dp[m][n];
 }
 
-async function ocrFull(file, onProgress){
-  const dataUrl = await new Promise((resolve,reject)=>{
-    const fr = new FileReader(); fr.onload = ()=>resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(file);
-  });
-  const { createWorker } = Tesseract;
-  const worker = await createWorker('eng', 1, { logger: onProgress? (m)=>onProgress(m) : undefined });
-  const out = await worker.recognize(dataUrl);
-  await worker.terminate();
-  return out; // out.data.text and out.data.words
-}
-
 function extractCourseAndDate(text){
   // Course name = first non-empty line; date like 25/10/2024 (or 25/10/24)
   const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
