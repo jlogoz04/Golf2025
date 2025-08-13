@@ -107,18 +107,26 @@ function textToCandidates(txt){
   return out.slice(0, 10);
 }
 
+// Use this if you only need the plain text:
 async function ocrImage(file, onProgress){
   const dataUrl = await new Promise((resolve,reject)=>{
-    const fr = new FileReader();
-    fr.onload = ()=> resolve(fr.result);
-    fr.onerror = reject;
-    fr.readAsDataURL(file);
+    const fr = new FileReader(); fr.onload = ()=> resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(file);
   });
-  const { createWorker } = Tesseract;
-  const worker = await createWorker('eng', 1, { logger: m => onProgress?.(m) });
-  const ret = await worker.recognize(dataUrl);
-  await worker.terminate();
+  const ret = await Tesseract.recognize(dataUrl, 'eng', {
+    logger: m => onProgress?.(m.status ? `${m.status}${m.progress!=null ? ' — '+Math.round(m.progress*100)+'%' : ''}` : '')
+  });
   return ret.data.text || '';
+}
+
+// Use this if you also need word boxes (for the 2x9 scores parser):
+async function ocrFull(file, onProgress){
+  const dataUrl = await new Promise((resolve,reject)=>{
+    const fr = new FileReader(); fr.onload = ()=> resolve(fr.result); fr.onerror = reject; fr.readAsDataURL(file);
+  });
+  const ret = await Tesseract.recognize(dataUrl, 'eng', {
+    logger: m => onProgress?.(m.status ? `${m.status}${m.progress!=null ? ' — '+Math.round(m.progress*100)+'%' : ''}` : '')
+  });
+  return ret; // has ret.data.text and ret.data.words
 }
 
 function setupScorecardUploader(){
