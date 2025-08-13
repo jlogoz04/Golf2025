@@ -60,18 +60,35 @@ function showPage(id, btn){
 
 async function ensureAuth(){
   try{ currentUser = await me(); }catch{ currentUser = null; }
+
   if(!currentUser){
+    // show login only
     $$('.page').forEach(s=> s.hidden = (s.id !== 'page-login'));
     $('#nav').innerHTML='';
+
     $('#login-btn').onclick = async ()=>{
       const u = $('#login-username').value.trim();
       const p = $('#login-password').value;
+      if(!u || !p){
+        $('#login-msg').textContent = 'Enter username and password';
+        return;
+      }
       $('#login-msg').textContent = 'Signing in...';
-      try{ await login(u,p); $('#login-msg').textContent = ''; start(); }
-      catch(e){ $('#login-msg').textContent = e.message || 'Login failed'; }
+      try{
+        await login(u,p);
+        $('#login-msg').textContent = '';
+        start();
+      }catch(e){
+        console.error('Login error:', e);
+        $('#login-msg').textContent = e.message || 'Login failed';
+      }
     };
+    // submit on Enter
+    $('#login-password').addEventListener('keydown', (ev)=>{ if(ev.key==='Enter') $('#login-btn').click(); });
+
     return false;
   } else {
+    // show app
     initNav();
     const isAdmin = currentUser.is_admin && currentUser.username==='jlogozzo';
     const tabs = $$('#nav .tab');
